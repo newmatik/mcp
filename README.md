@@ -1,5 +1,21 @@
 # Frappe MCP
 
+## Development in the Newmatik fork
+
+Contributor instructions: [AGENTS.md](AGENTS.md). Install and test offline:
+
+```sh
+uv sync --frozen --python 3.13
+uv run --frozen ruff check .
+uv run --frozen pytest -q
+```
+
+CI tests the committed lockfile on Python 3.10 and 3.13. It does not need a
+Frappe site or credentials. The locked Pydantic native dependency does not
+build on Python 3.14; a live Frappe v16 integration needs separate validation.
+
+## Usage
+
 Frappe MCP allows your Frappe Framework app to function as a [Streamable HTTP MCP
 server](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports#streamable-http).
 
