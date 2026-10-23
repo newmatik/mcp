@@ -4,8 +4,8 @@ This is Newmatik's fork of `frappe-mcp`. Its public package and protocol
 contracts are consumed by other Frappe applications. Preserve exported names,
 registration behavior and response shapes during maintenance.
 
-- Use the committed `uv.lock`: `uv sync --frozen --python 3.13`.
-- Run `uv run --frozen ruff check .` and `uv run --frozen pytest -q`.
+- Use the committed `uv.lock`: `uv sync --locked --python 3.13`.
+- Run `uv run --locked ruff check .` and `uv run --locked pytest -q`.
   CI runs the offline suite on Python 3.10 and 3.13 with no site or credentials.
 - The current lockfile's Pydantic native dependency does not build on Python
   3.14. Do not bypass its interpreter check; upgrading that dependency requires

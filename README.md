@@ -5,9 +5,9 @@
 Contributor instructions: [AGENTS.md](AGENTS.md). Install and test offline:
 
 ```sh
-uv sync --frozen --python 3.13
-uv run --frozen ruff check .
-uv run --frozen pytest -q
+uv sync --locked --python 3.13
+uv run --locked ruff check .
+uv run --locked pytest -q
 ```
 
 CI tests the committed lockfile on Python 3.10 and 3.13. It does not need a
