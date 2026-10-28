@@ -6,6 +6,7 @@ from werkzeug.wrappers import Request, Response
 
 from frappe_mcp.server import types
 from frappe_mcp.server.server import MCP
+from frappe_mcp.server.tools import ToolError
 
 
 @pytest.fixture
@@ -229,3 +230,88 @@ def test_handler_exception_returns_internal_error(mcp_instance):
 
     result = _post(mcp_instance, 'tools/call', {'name': 'boom', 'arguments': {}})
     assert result['result']['isError'] is True
+
+
+def test_initialize_sends_instructions():
+    mcp = MCP(name='frappe-mcp', instructions='Call whoami first.')
+    result = _post(mcp, 'initialize', {'clientInfo': {'name': 'test'}})
+    assert result['result']['instructions'] == 'Call whoami first.'
+
+
+def test_initialize_omits_missing_instructions(mcp_instance):
+    result = _post(mcp_instance, 'initialize', {'clientInfo': {'name': 'test'}})
+    assert 'instructions' not in result['result']
+
+
+def test_list_tools_is_sorted_by_name():
+    mcp = MCP(name='frappe-mcp')
+    for name in ('zeta', 'alpha', 'mid'):
+        mcp.tool(name=name, description=name)(lambda: None)
+
+    result = _post(mcp, 'tools/list')
+    assert [tool['name'] for tool in result['result']['tools']] == ['alpha', 'mid', 'zeta']
+
+
+def test_list_tools_sends_output_schema():
+    mcp = MCP(name='frappe-mcp')
+    schema = {'type': 'object', 'properties': {'rows': {'type': 'array'}}}
+
+    @mcp.tool(output_schema=schema)
+    def rows() -> dict:
+        """Return rows."""
+        return {'rows': []}
+
+    result = _post(mcp, 'tools/list')
+    assert result['result']['tools'][0]['outputSchema'] == schema
+
+
+def test_tool_filter_hides_tools_from_list_and_call(mcp_instance):
+    mcp_instance.set_tool_filter(lambda tool: tool['name'] != 'subtractor')
+
+    listed = _post(mcp_instance, 'tools/list')
+    assert [tool['name'] for tool in listed['result']['tools']] == ['adder']
+
+    called = _post(mcp_instance, 'tools/call', {'name': 'subtractor', 'arguments': {'a': 1, 'b': 1}})
+    assert called['error']['code'] == -32602
+
+    shown = _post(mcp_instance, 'tools/call', {'name': 'adder', 'arguments': {'a': 1, 'b': 1}})
+    assert shown['result']['structuredContent'] == {'output': 2}
+
+
+def test_tool_filter_can_be_cleared(mcp_instance):
+    mcp_instance.set_tool_filter(lambda tool: False)
+    mcp_instance.set_tool_filter(None)
+
+    listed = _post(mcp_instance, 'tools/list')
+    assert len(listed['result']['tools']) == 2
+
+
+def test_unknown_tool_returns_invalid_params(mcp_instance):
+    result = _post(mcp_instance, 'tools/call', {'name': 'nonexistent', 'arguments': {}})
+    assert result['error']['code'] == -32602
+    assert 'nonexistent' in result['error']['message']
+
+
+def test_tool_error_returns_structured_content(mcp_instance):
+    @mcp_instance.tool()
+    def refuse():
+        """Refuses with a structured error."""
+        raise ToolError('Not allowed.', {'error': {'code': 'permission_denied', 'message': 'Not allowed.'}})
+
+    result = _post(mcp_instance, 'tools/call', {'name': 'refuse', 'arguments': {}})
+    assert result['result']['isError'] is True
+    assert result['result']['content'] == [{'type': 'text', 'text': 'Not allowed.'}]
+    assert result['result']['structuredContent'] == {
+        'error': {'code': 'permission_denied', 'message': 'Not allowed.'}
+    }
+
+
+def test_tool_error_without_structured_content(mcp_instance):
+    @mcp_instance.tool()
+    def refuse_plain():
+        """Refuses with a message only."""
+        raise ToolError('Not allowed.')
+
+    result = _post(mcp_instance, 'tools/call', {'name': 'refuse_plain', 'arguments': {}})
+    assert result['result']['isError'] is True
+    assert 'structuredContent' not in result['result']

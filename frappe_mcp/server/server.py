@@ -51,14 +51,25 @@ class MCP:
     """
 
     _name: str | None
+    _instructions: str | None
     _tool_registry: OrderedDict[str, tools.Tool]
     _prompt_registry: OrderedDict[str, prompts.Prompt]
+    _tool_filter: Callable[[tools.Tool], bool] | None
     _mcp_entry_fn: Callable | None
 
-    def __init__(self, name: str | None):
+    def __init__(self, name: str | None, *, instructions: str | None = None):
+        """Create an MCP server.
+
+        Args:
+            name: The server name sent in `serverInfo`.
+            instructions: Text sent as `instructions` in the `initialize`
+                result, telling clients how to use the server's tools.
+        """
         self._tool_registry = OrderedDict()
         self._prompt_registry = OrderedDict()
         self._name = name
+        self._instructions = instructions
+        self._tool_filter = None
         self._mcp_entry_fn = None
 
     def register(
@@ -161,6 +172,7 @@ class MCP:
         name: str | None = None,
         description: str | None = None,
         input_schema: dict | None = None,
+        output_schema: dict | None = None,
         use_entire_docstring: bool = False,
         annotations: tools.ToolAnnotations | None = None,
         # stream: bool = False,  # stream yes or no (SSE)
@@ -181,6 +193,8 @@ class MCP:
                 extracted from the function's docstring.
             input_schema: The JSON schema for the tool's input. If not provided, it will be
                 inferred from the function's signature and docstring.
+            output_schema: The JSON schema of the tool's `structuredContent`.
+                A tool with an output schema must return a dict that matches it.
             use_entire_docstring: If True, the entire docstring will be used as the tool's
                 description. Otherwise, only the first section is used (i.e. no Args).
             annotations: Additional context about the tool, such as validation information
@@ -194,6 +208,7 @@ class MCP:
                     name=name,
                     description=description,
                     input_schema=input_schema,
+                    output_schema=output_schema,
                     use_entire_docstring=use_entire_docstring,
                     annotations=annotations,
                 ),
@@ -215,6 +230,27 @@ class MCP:
                 'name', 'description', 'input_schema', and 'fn'.
         """
         self._tool_registry[tool['name']] = tool
+
+    def set_tool_filter(self, fn: Callable[[tools.Tool], bool] | None):
+        """Show a tool only to callers for whom `fn(tool)` is true.
+
+        The filter runs on every `tools/list` and `tools/call` request, so it
+        can depend on the current user. A hidden tool is left out of the list,
+        and calling it is answered like calling an unknown tool. The filter
+        hides tools; it is not an access check, so tools still check
+        permissions themselves.
+
+        Args:
+            fn: The filter, or None to show every tool.
+        """
+        self._tool_filter = fn
+
+    def _visible_tools(self) -> OrderedDict[str, tools.Tool]:
+        if self._tool_filter is None:
+            return self._tool_registry
+        return OrderedDict(
+            (name, tool) for name, tool in self._tool_registry.items() if self._tool_filter(tool)
+        )
 
     def prompt(
         self,
@@ -289,7 +325,9 @@ class MCP:
         try:
             match method:
                 case 'initialize':
-                    result = handlers.handle_initialize(params, self._name or 'frappe-mcp')
+                    result = handlers.handle_initialize(
+                        params, self._name or 'frappe-mcp', self._instructions
+                    )
                 case 'ping':
                     result = handlers.handle_ping(params)
                 case 'completion/complete':
@@ -311,9 +349,9 @@ class MCP:
                 case 'resources/unsubscribe':
                     result = handlers.handle_unsubscribe(params)
                 case 'tools/call':
-                    result = tools.handle_call_tool(params, self._tool_registry)
+                    result = tools.handle_call_tool(params, self._visible_tools())
                 case 'tools/list':
-                    result = tools.handle_list_tools(params, self._tool_registry)
+                    result = tools.handle_list_tools(params, self._visible_tools())
                 case _:
                     return handle_invalid(
                         request_id,

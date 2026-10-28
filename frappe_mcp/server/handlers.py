@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 
-def handle_initialize(params, name: str):
+def handle_initialize(params, name: str, instructions: str | None = None):
     """
     Handles the initialize request from the client.
     """
-    return {
+    result = {
         'protocolVersion': '2025-03-26',
         # "protocolVersion": "2024-11-05",
         'serverInfo': {'name': name, 'version': '0.1.0'},
@@ -18,6 +18,9 @@ def handle_initialize(params, name: str):
             # "logging": {},
         },
     }
+    if instructions:
+        result['instructions'] = instructions
+    return result
 
 
 def handle_ping(_):
