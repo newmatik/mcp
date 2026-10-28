@@ -8,6 +8,7 @@ from pydantic import ValidationError
 
 import frappe_mcp.server.tools as tools
 from frappe_mcp.server import types
+from frappe_mcp.server.tools.errors import ToolError
 
 
 def handle_call_tool(params, tool_registry: OrderedDict[str, tools.Tool]):
@@ -19,11 +20,9 @@ def handle_call_tool(params, tool_registry: OrderedDict[str, tools.Tool]):
     arguments = call_params.arguments or {}
 
     if tool_name not in tool_registry:
-        # TODO: Figure out how to return a proper JSON-RPC error
-        # For now, return a result with an error indication.
-        error_content = types.TextContent(text=f"Tool '{tool_name}' not found.")
-        result = types.CallToolResult(content=[error_content], isError=True)
-        return result.model_dump(exclude_none=True, by_alias=True)
+        # The server answers a ValueError with JSON-RPC -32602 (Invalid params),
+        # as the spec asks for unknown tools.
+        raise ValueError(f"Unknown tool: {tool_name}")
 
     tool_info = tool_registry[tool_name]
     fn = tool_info.get('fn')
@@ -37,6 +36,12 @@ def handle_call_tool(params, tool_registry: OrderedDict[str, tools.Tool]):
 
     try:
         return _get_result(fn, arguments)
+    except ToolError as e:
+        error_content = types.TextContent(text=e.message)
+        result = types.CallToolResult(
+            content=[error_content], structuredContent=e.structured_content, isError=True
+        )
+        return result.model_dump(exclude_none=True, by_alias=True)
     except Exception as e:
         error_content = types.TextContent(text=f"Error calling tool '{tool_name}': {e}")
         result = types.CallToolResult(content=[error_content], isError=True)
@@ -75,7 +80,9 @@ def handle_list_tools(params, tool_registry: OrderedDict[str, tools.Tool]):
     types.ListToolsRequestParams.model_validate(params)
 
     tool_list = []
-    for tool_info in tool_registry.values():
+    # Sorted by name so the list, and a client's prompt cache, stays the
+    # same however the tools were imported.
+    for _, tool_info in sorted(tool_registry.items()):
         if tool := get_validated_tool(tool_info):
             tool_list.append(tool)
 

@@ -184,6 +184,7 @@ The decorator accepts the following optional arguments:
 - `name` (optional `str`): The name of the tool. If not provided, the function's `__name__` will be used.
 - `description` (optional `str`): A description of what the tool does. If not provided, it will be extracted from the function's docstring.
 - `input_schema` (optional `dict`): The JSON schema for the tool's input. If not provided, it will be inferred from the function's signature and docstring.
+- `output_schema` (optional `dict`): The JSON schema of the tool's `structuredContent`, sent as `outputSchema` in `tools/list`. A tool with an output schema must return a dict that matches it.
 - `use_entire_docstring` (optional `bool`): If `True`, the entire docstring will be used as the tool's description. Otherwise, only the first section is used (i.e. no `Args`). Defaults to `False`.
 - `annotations` (optional `dict`): Additional context about the tool, such as validation information or examples of how to use it. This should be a dictionary conforming to the `ToolAnnotations` `TypedDict` structure.
 
@@ -234,6 +235,39 @@ weather_tool = Tool(
 
 # Add the tool to the MCP instance
 mcp.add_tool(weather_tool)
+```
+
+#### Tool errors
+
+An exception raised by a tool becomes an error result (`isError: true`) with
+the message as text. Raise `ToolError` to also send `structuredContent`, so
+clients can branch on the kind of error:
+
+```python
+from frappe_mcp import ToolError
+
+@mcp.tool()
+def get_order(name: str):
+    '''Return an order.'''
+    raise ToolError(
+        "Order not found.",
+        {"error": {"code": "not_found", "message": "Order not found."}},
+    )
+```
+
+Calling a tool that isn't registered, or that the tool filter hides, is
+answered with JSON-RPC error `-32602` (Invalid params). `tools/list` returns
+the tools sorted by name.
+
+#### Tool filter
+
+`mcp.set_tool_filter(fn)` shows a tool only when `fn(tool)` returns `True`.
+The filter runs on every `tools/list` and `tools/call` request, so it can
+depend on the current user, for example to hide admin tools from other users.
+It only hides tools: each tool still checks permissions itself.
+
+```python
+mcp.set_tool_filter(lambda tool: tool["name"] != "admin_tool" or is_admin())
 ```
 
 #### Tool Annotations
@@ -322,6 +356,9 @@ added using the `@mcp.tool()` decorator.
 
 For use in other Werkzeug-based servers, you can use the `mcp.handle()` method
 directly.
+
+`MCP(name, instructions=...)` sends `instructions` in the `initialize` result:
+text that tells clients how to use the server's tools.
 
 #### `mcp.register` decorator
 

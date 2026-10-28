@@ -6,12 +6,14 @@ from typing import Any, TypedDict
 
 from jsonschema import validate
 
+from frappe_mcp.server.tools.errors import ToolError
 from frappe_mcp.server.tools.handlers import handle_call_tool, handle_list_tools
 from frappe_mcp.server.tools.tool_schema import get_descriptions, get_input_schema
 
 __all__ = [
     "Tool",
     "ToolAnnotations",
+    "ToolError",
     "ToolOptions",
     "get_tool",
     "handle_call_tool",
@@ -41,6 +43,7 @@ class ToolOptions(TypedDict, total=False):
     name: str | None
     description: str | None
     input_schema: dict | None
+    output_schema: dict | None
     use_entire_docstring: bool
     annotations: ToolAnnotations | None
 
@@ -51,6 +54,7 @@ def get_tool(fn: Callable, options: ToolOptions | None = None):
             name=None,
             description=None,
             input_schema=None,
+            output_schema=None,
             use_entire_docstring=False,
             annotations=None,
         )
@@ -75,7 +79,7 @@ def get_tool(fn: Callable, options: ToolOptions | None = None):
         name=name,
         description=description,
         input_schema=input_schema,
-        output_schema=None,
+        output_schema=options.get("output_schema"),
         annotations=options.get("annotations"),
     )
     return tool
