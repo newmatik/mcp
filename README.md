@@ -5,14 +5,14 @@
 Contributor instructions: [AGENTS.md](AGENTS.md). Install and test offline:
 
 ```sh
-uv sync --locked --python 3.13
+uv sync --locked --python 3.14
 uv run --locked ruff check .
 uv run --locked pytest -q
 ```
 
-CI tests the committed lockfile on Python 3.10 and 3.13. It does not need a
-Frappe site or credentials. The locked Pydantic native dependency does not
-build on Python 3.14; a live Frappe v16 integration needs separate validation.
+CI tests the committed lockfile on Python 3.10, 3.13 and 3.14. It does not need
+a Frappe site or credentials; a live Frappe v16 integration needs separate
+validation.
 
 ## Usage
 
