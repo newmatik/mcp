@@ -59,7 +59,13 @@ class MCP:
     _tool_filter: Callable[[tools.Tool], bool] | None
     _mcp_entry_fn: Callable | None
 
-    def __init__(self, name: str | None, *, instructions: str | None = None, allowed_origins: tuple[str, ...] = ()):
+    def __init__(
+        self,
+        name: str | None,
+        *,
+        instructions: str | None = None,
+        allowed_origins: tuple[str, ...] = (),
+    ):
         """Create an MCP server.
 
         Args:
@@ -163,30 +169,64 @@ class MCP:
         except (json.JSONDecodeError, BadRequest):
             return handle_invalid(None, response, types.PARSE_ERROR, 'Parse error')
 
-        if not isinstance(data, dict) or data.get('jsonrpc') != '2.0' or not isinstance(data.get('method'), str):
-            return handle_invalid(None, response, types.INVALID_REQUEST, 'Expected one JSON-RPC request')
+        if (
+            not isinstance(data, dict)
+            or data.get('jsonrpc') != '2.0'
+            or not isinstance(data.get('method'), str)
+        ):
+            return handle_invalid(
+                None, response, types.INVALID_REQUEST, 'Expected one JSON-RPC request'
+            )
         method = data['method']
         params = data.get('params', {})
         request_id = data.get('id')
         if 'id' in data and type(request_id) not in (int, str):
-            return handle_invalid(None, response, types.INVALID_REQUEST, 'Invalid request id')
+            return handle_invalid(
+                None, response, types.INVALID_REQUEST, 'Invalid request id'
+            )
         if not isinstance(params, dict):
-            return handle_invalid(request_id, response, types.INVALID_PARAMS, 'Expected a params object')
+            return handle_invalid(
+                request_id, response, types.INVALID_PARAMS, 'Expected a params object'
+            )
         version = request.headers.get('Mcp-Protocol-Version')
         meta = params.get('_meta')
-        has_modern_meta = isinstance(meta, dict) and (stateless.VERSION in meta or stateless.CLIENT in meta)
-        modern = method == 'server/discover' or has_modern_meta or (
-            method != 'initialize' and version != stateless.LEGACY
-            and (version is not None or 'Mcp-Method' in request.headers)
+        has_modern_meta = isinstance(meta, dict) and any(
+            key in meta
+            for key in (
+                stateless.VERSION,
+                stateless.CLIENT,
+                'io.modelcontextprotocol/clientInfo',
+            )
         )
-        visible_tools = self._visible_tools() if method in ('tools/list', 'tools/call') else {}
+        modern = (
+            method == 'server/discover'
+            or has_modern_meta
+            or 'requestState' in params
+            or 'inputResponses' in params
+            or (
+                method != 'initialize'
+                and version != stateless.LEGACY
+                and (version is not None or 'Mcp-Method' in request.headers)
+            )
+        )
+        visible_tools = (
+            self._visible_tools() if method in ('tools/list', 'tools/call') else {}
+        )
         name = params.get('name')
-        fields = self._headers.get(name, {}) if method == 'tools/call' and isinstance(name, str) and name in visible_tools else {}
+        fields = (
+            self._headers.get(name, {})
+            if method == 'tools/call'
+            and isinstance(name, str)
+            and name in visible_tools
+            else {}
+        )
         try:
             if modern and 'id' in data:
                 stateless.validate(request.headers, method, params, fields)
             else:
-                stateless.validate_routing(request.headers, method, params, fields, optional=True)
+                stateless.validate_routing(
+                    request.headers, method, params, fields, optional=True
+                )
         except stateless.ProtocolError as exc:
             return handle_invalid(request_id, response, exc.code, str(exc), exc.data)
         if modern:
@@ -194,8 +234,12 @@ class MCP:
                 response.status_code = 202
                 return response
             if 'cursor' in params:
-                return handle_invalid(request_id, response, types.INVALID_PARAMS, 'Unknown cursor')
-            return self._handle_request(request_id, data, response, modern=True, visible_tools=visible_tools)
+                return handle_invalid(
+                    request_id, response, types.INVALID_PARAMS, 'Unknown cursor'
+                )
+            return self._handle_request(
+                request_id, data, response, modern=True, visible_tools=visible_tools
+            )
 
         if get_is_notification(data):
             return handle_notification(data, response)
@@ -208,7 +252,9 @@ class MCP:
                 'Invalid Request',
             )
 
-        return self._handle_request(request_id, data, response, visible_tools=visible_tools)
+        return self._handle_request(
+            request_id, data, response, visible_tools=visible_tools
+        )
 
     def tool(
         self,
@@ -294,7 +340,9 @@ class MCP:
         if self._tool_filter is None:
             return self._tool_registry
         return OrderedDict(
-            (name, tool) for name, tool in self._tool_registry.items() if self._tool_filter(tool)
+            (name, tool)
+            for name, tool in self._tool_registry.items()
+            if self._tool_filter(tool)
         )
 
     def prompt(
@@ -375,13 +423,20 @@ class MCP:
                 case 'server/discover' if modern:
                     capabilities = {'tools': {}, 'prompts': {}}
                     if self.workflows.skills:
-                        capabilities.update({'resources': {}, 'extensions': {SKILLS: {}}})
-                    result = {'supportedVersions': [stateless.REVISION], 'capabilities': capabilities}
+                        capabilities.update(
+                            {'resources': {}, 'extensions': {SKILLS: {}}}
+                        )
+                    result = {
+                        'supportedVersions': [stateless.REVISION],
+                        'capabilities': capabilities,
+                    }
                     if self._instructions:
                         result['instructions'] = self._instructions
                 case 'skills/list' | 'skills/get' if modern and self.workflows.skills:
                     result = self.workflows.handle(method, params)
-                case 'resources/list' | 'resources/read' | 'resources/templates/list' if self.workflows.skills:
+                case (
+                    'resources/list' | 'resources/read' | 'resources/templates/list'
+                ) if self.workflows.skills:
                     result = self.workflows.handle(method, params)
                 case 'initialize' if not modern:
                     result = handlers.handle_initialize(
@@ -418,21 +473,42 @@ class MCP:
                         request_id,
                         response,
                         types.METHOD_NOT_FOUND,
-                        'Method not found', status=404 if modern else 400,
+                        'Method not found',
+                        status=404 if modern else 400,
                     )
         except ValueError as e:
             return handle_invalid(request_id, response, types.INVALID_PARAMS, str(e))
         except NotImplementedError:
-            return handle_invalid(request_id, response, types.METHOD_NOT_FOUND, 'Method not implemented', status=404 if modern else 400)
+            return handle_invalid(
+                request_id,
+                response,
+                types.METHOD_NOT_FOUND,
+                'Method not implemented',
+                status=404 if modern else 400,
+            )
         except Exception as e:
-            return handle_invalid(request_id, response, types.INTERNAL_ERROR, f'Internal error: {e}')
+            return handle_invalid(
+                request_id, response, types.INTERNAL_ERROR, f'Internal error: {e}'
+            )
 
         result = {} if result is None else result
         if modern:
-            if method in ('server/discover', 'skills/list', 'skills/get', 'resources/list', 'resources/read', 'resources/templates/list', 'tools/list', 'prompts/list'):
+            if method in (
+                'server/discover',
+                'skills/list',
+                'skills/get',
+                'resources/list',
+                'resources/read',
+                'resources/templates/list',
+                'tools/list',
+                'prompts/list',
+            ):
                 result.update(stateless.CACHE)
             result['resultType'] = 'complete'
-            result.setdefault('_meta', {})[stateless.SERVER] = {'name': self._name or 'frappe-mcp', 'version': '0.1.1'}
+            result.setdefault('_meta', {})[stateless.SERVER] = {
+                'name': self._name or 'frappe-mcp',
+                'version': '0.1.1',
+            }
         success_response = types.JSONRPCSuccessResponse(id=request_id, result=result)
         response.data = get_response_data(success_response)
         response.mimetype = 'application/json'
@@ -470,7 +546,8 @@ def handle_invalid(
     code: int,
     message: str,
     data: dict | None = None,
-    *, status: int = 400,
+    *,
+    status: int = 400,
 ) -> Response:
     error_response = types.JSONRPCErrorResponse(
         id=request_id if request_id is not None else None,

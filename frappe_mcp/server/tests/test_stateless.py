@@ -212,3 +212,27 @@ def test_workflow_file_cannot_also_be_a_directory():
             'Open the document',
             files={'a/b': 'file', 'a': 'file'},
         )
+
+
+def test_incomplete_july_call_never_executes_as_legacy(app):
+    server, _, effects = app
+    for marker in (
+        {'requestState': 'partial'},
+        {'inputResponses': {}},
+        {
+            '_meta': {
+                'io.modelcontextprotocol/clientInfo': {
+                    'name': 'fixture',
+                    'version': '1',
+                }
+            }
+        },
+    ):
+        result = send(
+            server,
+            'tools/call',
+            {'name': 'lookup', 'arguments': {'region': 'example'}, **marker},
+            modern=False,
+        )
+        assert result.json['error']['code'] == -32602
+    assert effects == []
