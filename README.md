@@ -466,3 +466,21 @@ can use it to test out your MCP server.
 > ```
 >
 > **This bypasses auth, so make sure you don't do this in production.**
+
+## July 2026 clients and workflows
+
+A July client can send `server/discover`, list tools or call an authorized tool directly through the same authenticated POST endpoint. Include `io.modelcontextprotocol/protocolVersion` (`2026-07-28`) and `io.modelcontextprotocol/clientCapabilities` in `params._meta`. Send the matching `Mcp-Protocol-Version` and `Mcp-Method` headers and the target `Mcp-Name` on tool calls, prompt retrieval or resource reads. A tool may annotate an eligible scalar input with `x-mcp-header`. The handler checks its mirrored value before dispatch. An unsupported version returns the server's supported revisions in error data. Existing clients can still initialize with `2025-03-26`.
+
+An app can publish a workflow with its instructions and references. The visibility callback runs for each request, including a direct read by URI. Use the current user's permissions for this callback and for each tool. In production the hosting Frappe app also supplies authentication and the access policy on the endpoint.
+
+```python
+mcp.workflows.add(
+    'review-work-order',
+    'Review a work order and its materials',
+    'Read references/materials.md and call the work order tool.',
+    files={'references/materials.md': 'Check the requested quantity and warehouse.'},
+    visible=can_read_work_orders,
+)
+```
+
+July hosts retrieve workflow metadata with `skills/list` and `skills/get`. Both July and handshake-era hosts can retrieve the files with `resources/read`. Each manifest includes the SHA-256 digest and UTF-8 byte size of every file. The host verifies the manifest and obtains user consent before loading instructions. Discovery and resource results carry private zero-TTL hints. Read the [July protocol](https://modelcontextprotocol.io/specification/2026-07-28) and the [Skills extension](https://modelcontextprotocol.io/extensions/skills/overview).
