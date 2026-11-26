@@ -112,13 +112,26 @@ def validate(headers: Headers, method: str, params: dict, fields: dict):
         raise ProtocolError(
             -32022,
             'Unsupported protocol version',
-            {'requested': version, 'supported': [REVISION, LEGACY]},
+            {'requested': version, 'supported': [REVISION]},
         )
-    if headers.get('Mcp-Method') != method:
+    validate_routing(headers, method, params, fields, optional=False)
+    if 'requestState' in params or 'inputResponses' in params:
+        raise ProtocolError(-32602, 'Unexpected continuation')
+
+
+def validate_routing(headers, method, params, fields, *, optional):
+    def mismatch():
+        raise ProtocolError(-32020, 'Routing headers do not match the request')
+
+    if (not optional or 'Mcp-Method' in headers) and headers.get(
+        'Mcp-Method'
+    ) != method:
         mismatch()
     if method in ('tools/call', 'resources/read', 'prompts/get'):
         name = params.get('uri' if method == 'resources/read' else 'name')
-        if not isinstance(name, str) or decoded_header(headers.get('Mcp-Name')) != name:
+        if (not optional or 'Mcp-Name' in headers) and (
+            not isinstance(name, str) or decoded_header(headers.get('Mcp-Name')) != name
+        ):
             mismatch()
     elif 'Mcp-Name' in headers:
         mismatch()
@@ -127,7 +140,7 @@ def validate(headers: Headers, method: str, params: dict, fields: dict):
         value: Any = params.get('arguments')
         for key in path:
             value = value.get(key) if isinstance(value, dict) else None
-        if value is None:
+        if value is None or (optional and header not in headers):
             continue
         wire = decoded_header(headers.get(header))
         mirrored[header] = True
@@ -135,10 +148,11 @@ def validate(headers: Headers, method: str, params: dict, fields: dict):
             mismatch()
         if kind == 'integer':
             if (
-                type(value) is not int
+                type(value) not in (int, float)
+                or (isinstance(value, float) and not value.is_integer())
                 or abs(value) > 2**53 - 1
                 or not re.fullmatch(r'-?(?:0|[1-9]\d*)(?:\.0+)?', wire)
-                or wire.split('.')[0] != str(value)
+                or int(wire.split('.')[0]) != value
             ):
                 mismatch()
         elif kind == 'boolean':
@@ -151,5 +165,3 @@ def validate(headers: Headers, method: str, params: dict, fields: dict):
         for k in headers.keys()
     ):
         mismatch()
-    if 'requestState' in params or 'inputResponses' in params:
-        raise ProtocolError(-32602, 'Unexpected continuation')

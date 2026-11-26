@@ -471,6 +471,8 @@ can use it to test out your MCP server.
 
 A July client can send `server/discover`, list tools or call an authorized tool directly through the same authenticated POST endpoint. Include `io.modelcontextprotocol/protocolVersion` (`2026-07-28`) and `io.modelcontextprotocol/clientCapabilities` in `params._meta`. Send the matching `Mcp-Protocol-Version` and `Mcp-Method` headers and the target `Mcp-Name` on tool calls, prompt retrieval or resource reads. A tool may annotate an eligible scalar input with `x-mcp-header`. The handler checks its mirrored value before dispatch. An unsupported version returns the server's supported revisions in error data. Existing clients can still initialize with `2025-03-26`.
 
+For browser-based clients, configure the public HTTPS origins explicitly in the MCP constructor with `allowed_origins`. Native clients without an Origin header work without this configuration.
+
 An app can publish a workflow with its instructions and references. The visibility callback runs for each request, including a direct read by URI. Use the current user's permissions for this callback and for each tool. In production the hosting Frappe app also supplies authentication and the access policy on the endpoint.
 
 ```python

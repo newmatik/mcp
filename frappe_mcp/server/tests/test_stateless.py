@@ -64,7 +64,7 @@ def send(app, method, params=None, headers=None, *, modern=True):
 def test_handshake_and_stateless_clients_share_registry(app):
     server, _, effects = app
     discover = send(server, 'server/discover').json['result']
-    assert discover['supportedVersions'] == [REVISION, '2025-03-26']
+    assert discover['supportedVersions'] == [REVISION]
     assert discover['capabilities']['extensions'] == {
         'io.modelcontextprotocol/skills': {}
     }
@@ -141,7 +141,7 @@ def test_http_errors_do_not_run_tools(app):
     assert response.json['error'] == {
         'code': -32022,
         'message': 'Unsupported protocol version',
-        'data': {'requested': '2099-01-01', 'supported': [REVISION, '2025-03-26']},
+        'data': {'requested': '2099-01-01', 'supported': [REVISION]},
     }
     assert (
         send(server, 'server/discover', {'_meta': {}}).json['error']['code'] == -32602
@@ -165,3 +165,50 @@ def test_http_errors_do_not_run_tools(app):
         assert response.status_code == 400
         assert 'id' not in response.json
     assert effects == []
+
+
+def test_routes_are_checked_before_legacy_effects_and_after_visibility(app):
+    server, principal, effects = app
+    params = {'name': 'lookup', 'arguments': {'region': 'Berlin'}}
+    assert (
+        send(
+            server, 'tools/call', params, {'Mcp-Name': 'different'}, modern=False
+        ).json['error']['code']
+        == -32020
+    )
+    assert (
+        send(
+            server, 'tools/call', params, {'Mcp-Param-Region': 'Paris'}, modern=False
+        ).json['error']['code']
+        == -32020
+    )
+    assert not effects
+    principal['can_read'] = False
+    assert send(server, 'tools/call', params).json['error']['code'] == -32602
+    assert send(server, 'unknown').status_code == 404
+    server = MCP('fixture', allowed_origins=('https://erp.example',))
+    assert (
+        send(
+            server, 'server/discover', headers={'Origin': 'https://erp.example'}
+        ).status_code
+        == 200
+    )
+    assert (
+        send(
+            server,
+            'server/discover',
+            headers={'Host': 'other.example', 'Origin': 'http://other.example'},
+        ).status_code
+        == 403
+    )
+
+
+def test_workflow_file_cannot_also_be_a_directory():
+    server = MCP('fixture')
+    with pytest.raises(ValueError, match='collide'):
+        server.workflows.add(
+            'guide',
+            'Read a file',
+            'Open the document',
+            files={'a/b': 'file', 'a': 'file'},
+        )

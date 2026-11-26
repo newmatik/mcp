@@ -7,6 +7,7 @@ import json
 import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from functools import cached_property
 from urllib.parse import quote
 
 SKILLS = 'io.modelcontextprotocol/skills'
@@ -38,13 +39,15 @@ class Skill:
             if path in values or any(p in ('', '.', '..') or '\\' in p for p in parts):
                 raise ValueError('Invalid skill file path')
             values[path] = content
+        if any('/'.join(path.split('/')[:i]) in values for path in values for i in range(1, len(path.split('/')))):
+            raise ValueError('File and directory paths collide')
         if (
             len(values) > 512
             or sum(len(content.encode()) for content in values.values())
             > 16 * 1024 * 1024
         ):
             raise ValueError('Skill exceeds portable size limits')
-        return cls(
+        skill = cls(
             name,
             description,
             tuple(
@@ -58,6 +61,10 @@ class Skill:
             visible,
         )
 
+        _ = skill.manifest  # Compute static byte counts and digests once at registration.
+        return skill
+
+    @cached_property
     def manifest(self):
         files = []
         for uri, _, text in self.resources:
@@ -99,11 +106,11 @@ class Workflows:
         skills = [skill for _, skill in sorted(self.skills.items()) if skill.visible()]
         uri = params.get('uri')
         if method == 'skills/list':
-            return {'skills': [skill.manifest() for skill in skills]}
+            return {'skills': [skill.manifest for skill in skills]}
         if method == 'skills/get':
             for skill in skills:
                 if skill.resources[0][0] == uri:
-                    return {'skill': skill.manifest()}
+                    return {'skill': skill.manifest}
         if method == 'resources/templates/list':
             return {'resourceTemplates': []}
         if method == 'resources/list':

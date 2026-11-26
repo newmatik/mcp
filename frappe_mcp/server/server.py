@@ -150,7 +150,7 @@ class MCP:
             The populated Werkzeug Response object
         """
         origin = request.headers.get('Origin')
-        if origin is not None and origin not in (request.host_url.rstrip('/'), *self._allowed_origins):
+        if origin is not None and origin not in self._allowed_origins:
             response.status_code = 403
             return response
         response.headers['Cache-Control'] = 'no-store'
@@ -174,24 +174,28 @@ class MCP:
             return handle_invalid(request_id, response, types.INVALID_PARAMS, 'Expected a params object')
         version = request.headers.get('Mcp-Protocol-Version')
         meta = params.get('_meta')
-        modern = (method == 'server/discover' or (isinstance(meta, dict) and (stateless.VERSION in meta or stateless.CLIENT in meta))
-                  or (version is not None and version != stateless.LEGACY and method != 'initialize')
-                  or (method != 'initialize' and version != stateless.LEGACY and 'Mcp-Method' in request.headers))
+        has_modern_meta = isinstance(meta, dict) and (stateless.VERSION in meta or stateless.CLIENT in meta)
+        modern = method == 'server/discover' or has_modern_meta or (
+            method != 'initialize' and version != stateless.LEGACY
+            and (version is not None or 'Mcp-Method' in request.headers)
+        )
+        visible_tools = self._visible_tools() if method in ('tools/list', 'tools/call') else {}
+        name = params.get('name')
+        fields = self._headers.get(name, {}) if method == 'tools/call' and isinstance(name, str) and name in visible_tools else {}
+        try:
+            if modern and 'id' in data:
+                stateless.validate(request.headers, method, params, fields)
+            else:
+                stateless.validate_routing(request.headers, method, params, fields, optional=True)
+        except stateless.ProtocolError as exc:
+            return handle_invalid(request_id, response, exc.code, str(exc), exc.data)
         if modern:
             if 'id' not in data:
                 response.status_code = 202
                 return response
-            name = params.get('name')
-            fields = self._headers.get(name, {}) if method == 'tools/call' and isinstance(name, str) else {}
-            try:
-                stateless.validate(request.headers, method, params, fields)
-            except stateless.ProtocolError as exc:
-                return handle_invalid(request_id, response, exc.code, str(exc), exc.data)
             if 'cursor' in params:
                 return handle_invalid(request_id, response, types.INVALID_PARAMS, 'Unknown cursor')
-            return self._handle_request(request_id, data, response, modern=True)
-        if 'Mcp-Method' in request.headers and request.headers['Mcp-Method'] != method:
-            return handle_invalid(request_id, response, -32020, 'Method header mismatch')
+            return self._handle_request(request_id, data, response, modern=True, visible_tools=visible_tools)
 
         if get_is_notification(data):
             return handle_notification(data, response)
@@ -204,7 +208,7 @@ class MCP:
                 'Invalid Request',
             )
 
-        return self._handle_request(request_id, data, response)
+        return self._handle_request(request_id, data, response, visible_tools=visible_tools)
 
     def tool(
         self,
@@ -348,6 +352,7 @@ class MCP:
         response: Response,
         *,
         modern: bool = False,
+        visible_tools: dict,
     ) -> Response:
         # Request
         try:
@@ -371,7 +376,7 @@ class MCP:
                     capabilities = {'tools': {}, 'prompts': {}}
                     if self.workflows.skills:
                         capabilities.update({'resources': {}, 'extensions': {SKILLS: {}}})
-                    result = {'supportedVersions': [stateless.REVISION, stateless.LEGACY], 'capabilities': capabilities}
+                    result = {'supportedVersions': [stateless.REVISION], 'capabilities': capabilities}
                     if self._instructions:
                         result['instructions'] = self._instructions
                 case 'skills/list' | 'skills/get' if modern and self.workflows.skills:
@@ -405,20 +410,20 @@ class MCP:
                 case 'resources/unsubscribe':
                     result = handlers.handle_unsubscribe(params)
                 case 'tools/call':
-                    result = tools.handle_call_tool(params, self._visible_tools())
+                    result = tools.handle_call_tool(params, visible_tools)
                 case 'tools/list':
-                    result = tools.handle_list_tools(params, self._visible_tools())
+                    result = tools.handle_list_tools(params, visible_tools)
                 case _:
                     return handle_invalid(
                         request_id,
                         response,
                         types.METHOD_NOT_FOUND,
-                        'Method not found',
+                        'Method not found', status=404 if modern else 400,
                     )
         except ValueError as e:
             return handle_invalid(request_id, response, types.INVALID_PARAMS, str(e))
         except NotImplementedError:
-            return handle_invalid(request_id, response, types.METHOD_NOT_FOUND, 'Method not implemented')
+            return handle_invalid(request_id, response, types.METHOD_NOT_FOUND, 'Method not implemented', status=404 if modern else 400)
         except Exception as e:
             return handle_invalid(request_id, response, types.INTERNAL_ERROR, f'Internal error: {e}')
 
@@ -465,6 +470,7 @@ def handle_invalid(
     code: int,
     message: str,
     data: dict | None = None,
+    *, status: int = 400,
 ) -> Response:
     error_response = types.JSONRPCErrorResponse(
         id=request_id if request_id is not None else None,
@@ -472,7 +478,7 @@ def handle_invalid(
     )
     response.data = get_response_data(error_response)
     response.mimetype = 'application/json'
-    response.status_code = 400
+    response.status_code = status
     return response
 
 
